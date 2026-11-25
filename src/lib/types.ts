@@ -23,7 +23,7 @@ export interface SiweNonce {
   statement: string
   issued_at: string
   expires_at: string
-  requires_email: boolean
+  requires_email?: boolean
 }
 
 export interface Campaign {
@@ -39,6 +39,7 @@ export interface Campaign {
   ends_at?: string | null
   organizer_id?: string
   organizer_name?: string | null
+  organizer_wallet_address?: `0x${string}` | null
   organizer?: { id?: string; name?: string }
   created_at?: string
   category?: string
@@ -55,9 +56,18 @@ export interface Donation {
   campaign?: Campaign | { title?: string }
   amount?: string | number
   currency?: string
+  payment_amount?: string | number | null
+  payment_currency?: string | null
+  exchange_rate?: string | number | null
+  exchange_rate_provider?: string | null
+  exchange_rate_at?: string | null
+  payment_method?: string | null
+  payment_provider?: string | null
+  payment_reference?: string | null
   status?: string
   created_at?: string
   transaction_hash?: string
+  donor_wallet_address?: string | null
   campaign_title?: string
   donor_name?: string
   donor_email?: string
@@ -68,6 +78,17 @@ export interface Donation {
   block_number?: number
   confirmations?: number
   is_anonymous?: boolean
+}
+
+export interface DonationPayment {
+  id: string
+  campaign_id: string
+  amount: string | number
+  currency: string
+  status: string
+  payment_method: 'GCASH' | 'MAYA' | string
+  checkout_url: string | null
+  test_mode: boolean
 }
 
 export interface Withdrawal {

@@ -8,8 +8,12 @@ const apiProxy = {
   },
 }
 
+const popupHeaders = {
+  'Cross-Origin-Opener-Policy': 'same-origin-allow-popups',
+}
+
 export default defineConfig({
   plugins: [react()],
-  server: { port: 5173, strictPort: true, proxy: apiProxy },
-  preview: { port: 4173, proxy: apiProxy },
+  server: { port: 5173, strictPort: true, proxy: apiProxy, headers: popupHeaders },
+  preview: { port: 4173, proxy: apiProxy, headers: popupHeaders },
 })

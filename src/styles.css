@@ -348,3 +348,48 @@ a,.btn,.campaign-card,.campaign-image img{transition:all 180ms ease-in-out}
   .note-two{right:-4px;bottom:34px}
   .floating-stat{right:12px;top:14px;width:64px;height:64px}
 }
+.profile-settings-grid{grid-template-columns:minmax(0,1.15fr) minmax(360px,.85fr);gap:24px}
+.profile-access-card{display:grid;gap:22px}
+.profile-access-section{display:grid;gap:14px}
+.profile-access-section+.profile-access-section{border-top:1px solid #E8E7E1;padding-top:20px}
+.profile-access-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}
+.profile-access-heading h2{font-size:16px;letter-spacing:-.3px;margin:0 0 5px}
+.profile-access-heading p,.profile-access-action p{font-size:11px;line-height:1.6;color:#777981;margin:0}
+.profile-access-action{display:grid;justify-items:start;gap:13px}
+.wallet-status{flex:none;padding:6px 9px;border-radius:20px;background:#F0EFEA;color:#73757B;font-size:9px;font-weight:800}
+.wallet-status.is-connected{background:#E2F2E8;color:#23784A}
+.profile-wallet-address{display:grid;gap:7px;padding:13px;border:1px solid #E2E1DC;border-radius:10px;background:#F4F3EF}
+.profile-wallet-address span,.profile-wallet-address small{font-size:9px;color:#81838A}
+.profile-wallet-address code{font-size:11px;line-height:1.5;color:#2A2D34;overflow-wrap:anywhere}
+.profile-access-card>.inline-error,.profile-access-card>.inline-success{margin:0}
+@media(max-width:820px){.profile-settings-grid{grid-template-columns:1fr}}
+.table-pagination{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:14px;
+  padding:12px 18px;
+  border-top:1px solid #EAE9E4;
+  color:#777981;
+  font-size:11px;
+}
+.table-pagination-controls{
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+.table-pagination-controls .btn{
+  min-height:32px;
+  padding:0 12px;
+  font-size:10px;
+}
+@media(max-width:600px){
+  .table-pagination{
+    align-items:flex-start;
+    flex-direction:column;
+  }
+  .table-pagination-controls{
+    width:100%;
+    justify-content:space-between;
+  }
+}

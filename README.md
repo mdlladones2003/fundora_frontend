@@ -77,13 +77,27 @@ The endpoint names below follow the Fundora Postman collection supplied for this
 | Campaign detail | GET | `/campaigns/{id}` |
 | Create campaign | POST | `/campaigns` |
 | Update campaign | PATCH | `/campaigns/{id}` |
-| Create donation | POST | `/donations` |
-| List donations | GET | `/donations` |
+| Create GCash/Maya payment | POST | `/donations` |
+| Check payment status | GET | `/donations/{id}/payment-status` |
+| List donor donations | GET | `/donations/my` |
 | List withdrawals | GET | `/withdrawals` |
 | Review withdrawal | POST | `/withdrawals/{id}/review` |
 | Transaction lookup | GET | `/transactions/{hash}` |
 
-The UI deliberately does not invent payment settlement, blockchain confirmation, or campaign withdrawal execution. It displays API-returned statuses and only submits the backend-supported actions.
+Donors contribute in PHP through GCash or Maya without connecting MetaMask.
+Debug builds default to a local payment simulator with a clearly labeled
+confirmation action; it does not collect money. To use Xendit Test Mode, set
+`PAYMENT_MODE=xendit`, `XENDIT_SECRET_KEY`, and `XENDIT_WEBHOOK_TOKEN` in the
+backend environment, then configure Xendit payment-session completion and
+expiry webhooks to call `/api/v1/webhooks/xendit`. The backend verifies each
+webhook against Xendit before confirming the donation and updating the campaign
+total.
+
+Xendit test credentials require a Xendit account in Test Mode. Real GCash/Maya
+settlements are paid to the merchant's Xendit account; they do not transfer
+directly to an organizer's MetaMask wallet. The campaign PHP total is Fundora's
+ledger value, not a representation of funds held in a wallet. Organizer wallet
+linking remains separate from donor checkout.
 
 ### API response expectations
 
@@ -124,7 +138,7 @@ If your Axum response structs differ, update the small adapter functions in `src
 2. `GET /donations` and `GET /withdrawals` are wired to the resource collection paths. Confirm those list routes are present in your current Axum router. If not, add them or adjust `donationApi.list()` / `withdrawalApi.list()`.
 3. The frontend never trusts a client-supplied role for authorization. Role checks here are only navigation/UX; API middleware and handlers remain authoritative.
 4. Campaign create uses the current Postman payload shape (`title`, `description`, `image_url`, `goal_amount`, `currency`, `network`, `contract_address`, `starts_at`, `ends_at`). Replace placeholder contract/network defaults with your backend's actual campaign deployment configuration before production.
-5. The campaign detail page submits a donation record to `POST /donations` using the current Postman payload (`campaign_id`, `amount`, `currency`, `is_anonymous`, `message`). This records a backend donation request; it does not claim that a payment has settled or a blockchain transaction has been confirmed.
+5. The campaign detail page submits `campaign_id`, `amount`, `payment_method`, `is_anonymous`, and `message` to `POST /donations`. The backend accepts PHP campaigns and confirms contributions only from the local simulator or a verified Xendit session. Xendit records display their provider reference; blockchain hash, network, block, and confirmation fields are marked not applicable because GCash/Maya are off-chain. A successful Xendit checkout returns donors to `/dashboard` when `FRONTEND_ORIGIN` is public HTTPS; local HTTP origins omit the redirect URL. A backend poller verifies pending Xendit sessions every 30 seconds as a webhook fallback, and the dashboard offers a manual retry while confirmation is pending.
 
 ## Project structure
 
@@ -150,7 +164,7 @@ src/
 
 ## Not yet included
 
-- Real payment processing or wallet transaction signing
+- Live-mode payment processing and organizer payouts
 - Upload service for campaign images
 - Live notifications
 - Full campaign edit/archive UX

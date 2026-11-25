@@ -3,6 +3,9 @@ import { twMerge } from 'tailwind-merge'
 export function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)) }
 export function formatMoney(value: number | string | undefined, currency = 'PHP') {
   const amount = Number(value ?? 0)
+  if (currency === 'ETH') {
+    return `${new Intl.NumberFormat('en-PH', { maximumFractionDigits: 18 }).format(Number.isFinite(amount) ? amount : 0)} ETH`
+  }
   return new Intl.NumberFormat('en-PH', { style: 'currency', currency, maximumFractionDigits: 2 }).format(Number.isFinite(amount) ? amount : 0)
 }
 export function formatDate(value?: string) {

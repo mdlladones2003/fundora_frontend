@@ -1,4 +1,4 @@
-import type { AdminDashboardSummary, AdminTransaction, AdminUser, AuditLog, Campaign, Donation, OrganizerRoleRequest, SiweNonce, Withdrawal } from './types'
+import type { AdminDashboardSummary, AdminTransaction, AdminUser, AuditLog, Campaign, Donation, DonationPayment, OrganizerRoleRequest, SiweNonce, Withdrawal } from './types'
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || '/api/v1').replace(/\/$/, '')
 const USE_CREDENTIALS = import.meta.env.VITE_USE_CREDENTIALS === 'true'
@@ -66,7 +66,11 @@ export async function request<T = any>(path: string, init: RequestInit = {}, ret
   }
   const payload: any = await parseResponse(response)
   if (!response.ok) {
-    const message = payload?.error || payload?.message || `Request failed (${response.status})`
+    const responseMessage =
+      typeof payload === 'string' && payload.trim()
+        ? payload.trim()
+        : `Request failed (${response.status})`
+    const message = payload?.error || payload?.message || responseMessage
     throw new ApiError(String(message), response.status, payload)
   }
   return payload as T
@@ -84,6 +88,12 @@ export const authApi = {
   verifyApple: (id_token: string, nonce: string) => request<any>('/auth/apple', json('POST', { id_token, nonce }), false),
   requestSiweNonce: (wallet_address: string) => request<SiweNonce>('/auth/siwe/nonce', json('POST', { wallet_address }), false),
   verifySiwe: (message: string, signature: string, email?: string) => request<any>('/auth/siwe/verify', json('POST', { message, signature, email }), false),
+  requestWalletLinkNonce: (wallet_address: string) => request<SiweNonce>('/auth/wallet/link/nonce', json('POST', { wallet_address })),
+  linkWallet: (message: string, signature: string) => request('/auth/wallet/link', json('POST', { message, signature })),
+}
+
+export const paymentApi = {
+  config: () => request<{ chain_id: number; contract_address: `0x${string}`; minimum_confirmations: number }>('/payments/config'),
 }
 
 export const campaignApi = {
@@ -103,7 +113,16 @@ export const campaignApi = {
 }
 
 export const donationApi = {
-  create: (body: { campaign_id: string; amount: string; currency: string; is_anonymous: boolean; message?: string }) => request('/donations', json('POST', body)),
+  create: (body: {
+    campaign_id: string
+    amount: number
+    payment_method: 'GCASH' | 'MAYA'
+    is_anonymous: boolean
+    message?: string
+  }) => request<DonationPayment>('/donations', json('POST', body)),
+  paymentStatus: (id: string) => request<DonationPayment>(`/donations/${encodeURIComponent(id)}/payment-status`),
+  simulatePayment: (id: string) => request<DonationPayment>(`/donations/${encodeURIComponent(id)}/simulate-payment`, json('POST')),
+  verify: (id: string, transaction_hash: string) => request<{ donation_id: string; status: string; transaction_hash: string; confirmations: number }>(`/donations/${encodeURIComponent(id)}/verify`, json('POST', { transaction_hash })),
   list: async () => {
     const payload: any = await request('/donations/my')
     const data = payload?.data ?? payload
