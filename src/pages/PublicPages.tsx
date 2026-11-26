@@ -4,36 +4,76 @@ import {
     ArrowUpRight,
     CheckCircle2,
     HeartHandshake,
+    Menu,
     ShieldCheck,
     Sparkles,
     Users,
     Wallet,
+    X,
 } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { Brand } from "../components/Layout";
+import { Brand, GlobalSearch } from "../components/Layout";
 import { CachedImage } from "../components/CachedImage";
 import { CampaignCard } from "../components/CampaignCard";
 import { Button, Card, EmptyState, Spinner, Status } from "../components/UI";
 import {
+    ApiError,
+    adminApi,
     campaignApi,
     donationApi,
     transactionApi,
 } from "../lib/api";
-import type { Campaign, DonationPayment } from "../lib/types";
-import { formatMoney } from "../lib/utils";
+import type {
+    Campaign,
+    CampaignAnalytics,
+    DonationPayment,
+} from "../lib/types";
+import {
+    filterCampaigns,
+    formatMoney,
+    isCampaignEditable,
+    roleOf,
+    type CampaignDateFilter,
+    type CampaignFilter,
+} from "../lib/utils";
 import { useAuth } from "../context/AuthContext";
 import { Field, TextareaField } from "../components/UI";
 
 function PublicHeader({ landing = false }: { landing?: boolean }) {
     const { signedIn } = useAuth();
+    const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     const accountPath = signedIn ? "/dashboard" : "/login";
     return (
         <header className="marketing-nav">
             <Brand to={landing ? "/" : undefined} />
-            <nav>
-                <Link to={landing ? "#campaigns" : "/campaigns"}>Explore</Link>
-                <Link to="/#how-it-works">How it works</Link>
+            <nav
+                id="public-navigation"
+                className={mobileMenuOpen ? "public-nav-open" : ""}
+            >
+                <a
+                    href={landing ? "#campaigns" : "/campaigns"}
+                    onClick={() => setMobileMenuOpen(false)}
+                >
+                    Explore
+                </a>
+                <a
+                    href={landing ? "#how-it-works" : "/#how-it-works"}
+                    onClick={() => setMobileMenuOpen(false)}
+                >
+                    How it works
+                </a>
             </nav>
+            {signedIn && <GlobalSearch compact />}
+            <button
+                type="button"
+                className="public-nav-toggle"
+                aria-label={mobileMenuOpen ? "Close navigation" : "Open navigation"}
+                aria-expanded={mobileMenuOpen}
+                aria-controls="public-navigation"
+                onClick={() => setMobileMenuOpen((open) => !open)}
+            >
+                {mobileMenuOpen ? <X size={18} /> : <Menu size={18} />}
+            </button>
             <div className="nav-cta">
                 <Link to={accountPath} className="nav-signin">
                     {signedIn ? "Overview" : "Sign in"}
@@ -270,9 +310,8 @@ export function HomePage() {
                             and track.
                         </h2>
                         <p>
-                            Fundora records contribution requests and shows
-                            transaction updates supplied by the configured
-                            backend.
+                            Browse campaign goals, complete a secure payment,
+                            and follow its status from your account.
                         </p>
                         <Link
                             to={signedIn ? "/dashboard" : "/login"}
@@ -298,8 +337,8 @@ export function HomePage() {
                             <div>
                                 <h3>Submit a contribution</h3>
                                 <p>
-                                    Enter an amount and confirm the contribution
-                                    request. The form does not process payment.
+                                    Review your amount, then complete payment
+                                    through Xendit’s hosted checkout.
                                 </p>
                             </div>
                         </div>
@@ -309,7 +348,7 @@ export function HomePage() {
                                 <h3>Check its status</h3>
                                 <p>
                                     Open My donations to review the record and
-                                    its on-chain transaction status.
+                                    its payment and transaction status.
                                 </p>
                             </div>
                         </div>
@@ -321,43 +360,74 @@ export function HomePage() {
     );
 }
 
-export function ExploreCampaignsPage() {
-    const { signedIn } = useAuth();
+export function ExploreCampaignsPage({
+    embedded = false,
+}: {
+    embedded?: boolean;
+} = {}) {
+    const { user } = useAuth();
     const [campaigns, setCampaigns] = useState<Campaign[]>([]);
     const [query, setQuery] = useState("");
-    const [status, setStatus] = useState("all");
+    const [filter, setFilter] = useState<CampaignFilter>("all");
+    const [dateFilter, setDateFilter] =
+        useState<CampaignDateFilter>("newest");
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
     useEffect(() => {
-        campaignApi
-            .list()
-            .then(setCampaigns)
+        const ownedCampaigns =
+            roleOf(user) === "organizer"
+                ? campaignApi.mine()
+                : Promise.resolve([]);
+        const visibleCampaigns =
+            roleOf(user) === "administrator" || roleOf(user) === "admin"
+                ? adminApi.campaigns()
+                : campaignApi.list();
+        Promise.all([visibleCampaigns, ownedCampaigns])
+            .then(([publicCampaigns, mine]) => {
+                const byId = new Map(
+                    [...publicCampaigns, ...mine].map((campaign) => [
+                        campaign.id,
+                        campaign,
+                    ]),
+                );
+                setCampaigns([...byId.values()]);
+            })
             .catch((e) => setError(e.message))
             .finally(() => setLoading(false));
-    }, []);
-    const filtered = campaigns.filter((c) => {
-        const matchesText =
-            `${c.title} ${c.description || ""} ${c.category || ""}`
+    }, [user]);
+    const filtered = filterCampaigns(campaigns, filter, dateFilter).filter(
+        (campaign) =>
+            `${campaign.title} ${campaign.description || ""} ${campaign.category || ""}`
                 .toLowerCase()
-                .includes(query.toLowerCase());
-        const matchesStatus =
-            status === "all" || (c.status || "active").toLowerCase() === status;
-        return matchesText && matchesStatus;
-    });
-    return (
-        <div className="marketing">
-            <PublicHeader />
-            <section className="explore-page section-block">
-                <div className="section-heading">
-                    <div>
-                        <div className="eyebrow">EXPLORE CAMPAIGNS</div>
-                        <h2>Find a cause worth backing.</h2>
-                    </div>
-                    <p>
-                        Browse published campaigns and follow each fundraiser's
-                        progress.
-                    </p>
-                </div>
+                .includes(query.trim().toLowerCase()),
+    );
+    const intro = embedded ? (
+        <div className="page-heading">
+            <div>
+                <div className="eyebrow">EXPLORE CAMPAIGNS</div>
+                <h1>Find a cause worth backing.</h1>
+                <p>Browse campaigns and compare each fundraiser’s progress.</p>
+            </div>
+        </div>
+    ) : (
+        <div className="section-heading">
+            <div>
+                <div className="eyebrow">EXPLORE CAMPAIGNS</div>
+                <h2>Find a cause worth backing.</h2>
+            </div>
+            <p>
+                Browse campaigns and compare each fundraiser’s progress.
+            </p>
+        </div>
+    );
+    const page = (
+        <section
+            className={
+                embedded ? "portal-explore" : "explore-page section-block"
+            }
+        >
+            {intro}
+            <div className="portal-explore-content">
                 <div className="explore-tools">
                     <Field
                         label="Search campaigns"
@@ -367,17 +437,49 @@ export function ExploreCampaignsPage() {
                         placeholder="Search title or cause"
                     />
                     <label className="field">
-                        <span>Status</span>
+                        <span>Date posted</span>
                         <select
-                            value={status}
-                            onChange={(e) => setStatus(e.target.value)}
+                            value={dateFilter}
+                            onChange={(e) =>
+                                setDateFilter(
+                                    e.target.value as CampaignDateFilter,
+                                )
+                            }
                         >
-                            <option value="all">All statuses</option>
-                            <option value="published">Published</option>
-                            <option value="active">Active</option>
-                            <option value="completed">Completed</option>
+                            <option value="newest">Newest first</option>
+                            <option value="oldest">Oldest first</option>
+                            <option value="week">
+                                Posted in the last 7 days
+                            </option>
+                            <option value="month">
+                                Posted in the last 30 days
+                            </option>
                         </select>
                     </label>
+                </div>
+                <div
+                    className="campaign-filter-tabs"
+                    role="group"
+                    aria-label="Filter campaigns"
+                >
+                    {(
+                        [
+                            ["all", "All campaigns"],
+                            ["goal-reached", "Goal reached"],
+                            ["goal-unreached", "Goal unreached"],
+                            ["closed", "Closed"],
+                            ["draft", "Draft"],
+                        ] as const
+                    ).map(([value, label]) => (
+                        <button
+                            key={value}
+                            type="button"
+                            className={filter === value ? "active" : ""}
+                            onClick={() => setFilter(value)}
+                        >
+                            {label}
+                        </button>
+                    ))}
                 </div>
                 {loading ? (
                     <div className="center-loading">
@@ -394,37 +496,189 @@ export function ExploreCampaignsPage() {
                 ) : (
                     <EmptyState
                         title="No campaigns match"
-                        description="Try a different search or status filter."
+                        description={
+                            filter === "draft" && roleOf(user) !== "organizer"
+                                ? "Draft campaigns are only visible to their organizers."
+                                : "Try a different search or filter."
+                        }
                     />
                 )}
-            </section>
+            </div>
+        </section>
+    );
+    return embedded ? (
+        page
+    ) : (
+        <div className="marketing">
+            <PublicHeader />
+            {page}
             <PublicFooter />
         </div>
     );
 }
 
-export function CampaignDetailPage() {
+export function CampaignDetailPage({
+    embedded = false,
+}: {
+    embedded?: boolean;
+} = {}) {
     const { id = "" } = useParams();
     const [campaign, setCampaign] = useState<Campaign | null>(null);
     const [error, setError] = useState("");
     const [loading, setLoading] = useState(true);
     const [busy, setBusy] = useState(false);
     const [donationError, setDonationError] = useState("");
+    const [viewTrackingError, setViewTrackingError] = useState("");
     const [success, setSuccess] = useState("");
+    const [reviewingDonation, setReviewingDonation] = useState(false);
+    const [donationDraft, setDonationDraft] = useState<{
+        amount: number;
+        is_anonymous: boolean;
+        message: string;
+    } | null>(null);
+    const [donationAmount, setDonationAmount] = useState("");
     const [paymentMethod, setPaymentMethod] = useState<"GCASH" | "MAYA">(
         "GCASH",
     );
     const [pendingPayment, setPendingPayment] =
         useState<DonationPayment | null>(null);
-    const { signedIn } = useAuth();
+    const [confirmedDonationId, setConfirmedDonationId] = useState("");
+    const [organizerAnalytics, setOrganizerAnalytics] =
+        useState<CampaignAnalytics | null>(null);
+    const [analyticsLoading, setAnalyticsLoading] = useState(false);
+    const [analyticsError, setAnalyticsError] = useState("");
+    const { signedIn, user } = useAuth();
     const navigate = useNavigate();
     useEffect(() => {
+        let active = true;
+        const loadCampaign = async () => {
+            setLoading(true);
+            setError("");
+            setCampaign(null);
+            setViewTrackingError("");
+            try {
+                let loadedCampaign: Campaign;
+                try {
+                    loadedCampaign = await campaignApi.get(id);
+                } catch (publicError) {
+                    const role = roleOf(user);
+                    const mayViewPrivate = [
+                        "organizer",
+                        "administrator",
+                        "admin",
+                    ].includes(role);
+                    if (
+                        !mayViewPrivate ||
+                        !(publicError instanceof ApiError) ||
+                        publicError.status !== 404
+                    ) {
+                        throw publicError;
+                    }
+                    const ownedCampaigns = await campaignApi.mine();
+                    const ownedCampaign = ownedCampaigns.find(
+                        (item) => item.id === id,
+                    );
+                    if (!ownedCampaign) throw publicError;
+                    loadedCampaign = ownedCampaign;
+                }
+                if (!active) return;
+                setCampaign(loadedCampaign);
+                const isPublic = [
+                    "published",
+                    "active",
+                    "completed",
+                ].includes(
+                    (loadedCampaign.status || "").trim().toLowerCase(),
+                );
+                if (!isPublic) return;
+                try {
+                    let sessionId = sessionStorage.getItem(
+                        "fundora_campaign_view_session",
+                    );
+                    if (!sessionId) {
+                        sessionId = window.crypto.randomUUID();
+                        sessionStorage.setItem(
+                            "fundora_campaign_view_session",
+                            sessionId,
+                        );
+                    }
+                    void campaignApi
+                        .trackView(id, sessionId)
+                        .catch((viewError: unknown) => {
+                            if (active) {
+                                setViewTrackingError(
+                                    viewError instanceof Error
+                                        ? viewError.message
+                                        : "Campaign view analytics could not be recorded.",
+                                );
+                            }
+                        });
+                } catch (viewError) {
+                    setViewTrackingError(
+                        viewError instanceof Error
+                            ? viewError.message
+                            : "Campaign view analytics could not be recorded.",
+                    );
+                }
+            } catch (loadError) {
+                if (active) {
+                    setError(
+                        loadError instanceof Error
+                            ? loadError.message
+                            : "Campaign could not be loaded.",
+                    );
+                }
+            } finally {
+                if (active) setLoading(false);
+            }
+        };
+        void loadCampaign();
+        return () => {
+            active = false;
+        };
+    }, [id, user?.id, user?.role]);
+    const isOrganizerOwner =
+        roleOf(user) === "organizer" &&
+        !!user?.id &&
+        campaign?.organizer_id === user.id;
+    const canContribute = ["donor", "organizer"].includes(roleOf(user));
+    useEffect(() => {
+        if (!campaign || !isOrganizerOwner) {
+            setOrganizerAnalytics(null);
+            setAnalyticsError("");
+            setAnalyticsLoading(false);
+            return;
+        }
+        let active = true;
+        setOrganizerAnalytics(null);
+        setAnalyticsError("");
+        setAnalyticsLoading(true);
         campaignApi
-            .get(id)
-            .then((r: any) => setCampaign(r?.data ?? r?.campaign ?? r))
-            .catch((e) => setError(e.message))
-            .finally(() => setLoading(false));
-    }, [id]);
+            .organizerAnalytics()
+            .then((items) => {
+                if (active) {
+                    setOrganizerAnalytics(
+                        items.find((item) => item.campaign_id === campaign.id) ??
+                            null,
+                    );
+                }
+            })
+            .catch((analyticsLoadError: unknown) => {
+                if (active) {
+                    setAnalyticsError(
+                        analyticsLoadError instanceof Error
+                            ? analyticsLoadError.message
+                            : "Campaign analytics could not be loaded.",
+                    );
+                }
+            })
+            .finally(() => {
+                if (active) setAnalyticsLoading(false);
+            });
+        return () => {
+            active = false;
+        };
+    }, [campaign?.id, campaign?.organizer_id, isOrganizerOwner]);
     useEffect(() => {
         const query = new URLSearchParams(window.location.search);
         const donationId = query.get("paymentDonation");
@@ -437,10 +691,15 @@ export function CampaignDetailPage() {
             .paymentStatus(donationId)
             .then(async (payment) => {
                 if (payment.status === "confirmed") {
+                    setConfirmedDonationId(payment.id);
                     setSuccess(
                         `${formatMoney(payment.amount, payment.currency)} contribution confirmed via ${payment.payment_method}.`,
                     );
                     setCampaign(await campaignApi.get(id));
+                } else if (["failed", "expired"].includes(payment.status)) {
+                    setDonationError(
+                        `Xendit payment ${payment.status}. Enter your contribution amount to try again.`,
+                    );
                 } else {
                     setPendingPayment(payment);
                     setSuccess(
@@ -452,8 +711,14 @@ export function CampaignDetailPage() {
     }, [id, signedIn]);
     const goal = Number(campaign?.goal_amount || 0),
         raised = Number(campaign?.raised_amount || 0),
+        maxContribution = Math.min(goal, 100_000),
         pct = goal ? Math.min(100, (raised / goal) * 100) : 0;
-    const contribute = async (e: FormEvent<HTMLFormElement>) => {
+    const dailyStatistics = organizerAnalytics?.daily_statistics ?? [];
+    const maxDailyDonation = Math.max(
+        0,
+        ...dailyStatistics.map((day) => Number(day.amount)),
+    );
+    const reviewDonation = (e: FormEvent<HTMLFormElement>) => {
         e.preventDefault();
         if (!campaign) return;
         if (!signedIn) {
@@ -462,29 +727,47 @@ export function CampaignDetailPage() {
             );
             return;
         }
+        setDonationError("");
+        setSuccess("");
+        setConfirmedDonationId("");
+        const form = new FormData(e.currentTarget);
+        const amountValue = form.get("amount");
+        const amount = Number(amountValue);
+        if (
+            typeof amountValue !== "string" ||
+            !amountValue.trim() ||
+            !Number.isFinite(amount) ||
+            amount < 1 ||
+            amount > maxContribution ||
+            Math.abs(amount * 100 - Math.round(amount * 100)) > 1e-8
+        ) {
+            setDonationError(
+                `Enter an amount from ${formatMoney(1, "PHP")} up to ${formatMoney(maxContribution, "PHP")} with up to two decimal places.`,
+            );
+            return;
+        }
+        setDonationDraft({
+            amount,
+            is_anonymous: form.get("is_anonymous") === "on",
+            message: String(form.get("message") || "").trim(),
+        });
+        setReviewingDonation(true);
+    };
+    const submitDonation = async () => {
+        if (!campaign || !donationDraft) return;
         setBusy(true);
         setDonationError("");
         setSuccess("");
-        const formElement = e.currentTarget;
-        const form = new FormData(formElement);
         try {
-            const amountValue = form.get("amount");
-            const amount = Number(amountValue);
-            if (
-                typeof amountValue !== "string" ||
-                !amountValue.trim() ||
-                !Number.isFinite(amount)
-            ) {
-                throw new Error("Enter a valid contribution amount.");
-            }
             const payment = await donationApi.create({
                 campaign_id: campaign.id,
-                amount,
+                amount: donationDraft.amount,
                 payment_method: paymentMethod,
-                is_anonymous: form.get("is_anonymous") === "on",
-                message: String(form.get("message") || ""),
+                is_anonymous: donationDraft.is_anonymous,
+                message: donationDraft.message,
             });
-            formElement.reset();
+            setReviewingDonation(false);
+            setDonationDraft(null);
             if (payment.checkout_url) {
                 window.location.assign(payment.checkout_url);
                 return;
@@ -506,13 +789,20 @@ export function CampaignDetailPage() {
         try {
             const payment = await donationApi.paymentStatus(pendingPayment.id);
             setPendingPayment(payment.status === "pending" ? payment : null);
-            setSuccess(
-                payment.status === "confirmed"
-                    ? `${formatMoney(payment.amount, payment.currency)} contribution confirmed via ${payment.payment_method}.`
-                    : `Payment status: ${payment.status}. Xendit will notify Fundora when it is confirmed.`,
-            );
             if (payment.status === "confirmed") {
+                setConfirmedDonationId(payment.id);
+                setSuccess(
+                    `${formatMoney(payment.amount, payment.currency)} contribution confirmed via ${payment.payment_method}.`,
+                );
                 setCampaign(await campaignApi.get(id));
+            } else if (["failed", "expired"].includes(payment.status)) {
+                setDonationError(
+                    `Xendit payment ${payment.status}. Review your contribution and try again.`,
+                );
+            } else {
+                setSuccess(
+                    `Payment status: ${payment.status}. Xendit will notify Fundora when it is confirmed.`,
+                );
             }
         } catch (err: any) {
             setDonationError(err.message);
@@ -529,6 +819,7 @@ export function CampaignDetailPage() {
                 pendingPayment.id,
             );
             setPendingPayment(null);
+            setConfirmedDonationId(payment.id);
             setSuccess(
                 `${formatMoney(payment.amount, payment.currency)} test contribution confirmed via ${payment.payment_method}.`,
             );
@@ -539,10 +830,8 @@ export function CampaignDetailPage() {
             setBusy(false);
         }
     };
-    return (
-        <div className="marketing public-campaign-page">
-            <PublicHeader />
-            <main className="public-campaign-content">
+    const content = (
+        <main className="public-campaign-content">
                 {loading ? (
                     <div className="center-loading">
                         <Spinner />
@@ -579,6 +868,16 @@ export function CampaignDetailPage() {
                                     "Every contribution helps this campaign move closer to its goal."}
                             </p>
                         </div>
+                        {isOrganizerOwner && isCampaignEditable(campaign) && (
+                            <div className="campaign-detail-actions">
+                                <Link
+                                    className="btn btn-outline"
+                                    to={`/organizer/campaigns/${campaign.id}/edit`}
+                                >
+                                    Edit campaign
+                                </Link>
+                            </div>
+                        )}
                         <div className="detail-grid">
                             <div>
                                 <div className="detail-image">
@@ -616,9 +915,137 @@ export function CampaignDetailPage() {
                                         </p>
                                     )}
                                 </div>
+                                {isOrganizerOwner && (
+                                    <Card className="campaign-detail-analytics">
+                                        <div className="campaign-analytics-heading">
+                                            <div>
+                                                <div className="eyebrow">
+                                                    ORGANIZER WORKSPACE
+                                                </div>
+                                                <h2>Campaign analytics</h2>
+                                            </div>
+                                            <span>Last 7 days</span>
+                                        </div>
+                                        {analyticsError && (
+                                            <div
+                                                className="inline-error"
+                                                role="status"
+                                            >
+                                                {analyticsError}
+                                            </div>
+                                        )}
+                                        {analyticsLoading ? (
+                                            <div className="center-loading">
+                                                <Spinner />
+                                            </div>
+                                        ) : organizerAnalytics ? (
+                                            <>
+                                                <div className="organizer-analytics-stats">
+                                                    <div>
+                                                        <span>Campaign views</span>
+                                                        <strong>
+                                                            {organizerAnalytics.views_count}
+                                                        </strong>
+                                                    </div>
+                                                    <div>
+                                                        <span>Total donors</span>
+                                                        <strong>
+                                                            {organizerAnalytics.total_donors}
+                                                        </strong>
+                                                    </div>
+                                                    <div>
+                                                        <span>Donated today</span>
+                                                        <strong>
+                                                            {formatMoney(
+                                                                organizerAnalytics.donations_today,
+                                                                campaign.currency ||
+                                                                    "PHP",
+                                                            )}
+                                                        </strong>
+                                                    </div>
+                                                </div>
+                                                <div
+                                                    className="campaign-donation-chart"
+                                                    role="img"
+                                                    aria-label={`${campaign.title}: confirmed donations during the last seven days`}
+                                                >
+                                                    {dailyStatistics.map(
+                                                        (day) => {
+                                                            const amount =
+                                                                Number(
+                                                                    day.amount,
+                                                                );
+                                                            const height =
+                                                                maxDailyDonation >
+                                                                0
+                                                                    ? Math.max(
+                                                                          amount >
+                                                                              0
+                                                                              ? 5
+                                                                              : 2,
+                                                                          (amount /
+                                                                              maxDailyDonation) *
+                                                                              100,
+                                                                      )
+                                                                    : 2;
+                                                            return (
+                                                                <div
+                                                                    className="campaign-donation-day"
+                                                                    key={
+                                                                        day.date
+                                                                    }
+                                                                    title={`${new Date(`${day.date}T12:00:00`).toLocaleDateString("en-PH")}: ${formatMoney(day.amount, campaign.currency || "PHP")}`}
+                                                                >
+                                                                    <span className="campaign-donation-bar-track">
+                                                                        <i
+                                                                            style={{
+                                                                                height: `${height}%`,
+                                                                            }}
+                                                                        />
+                                                                    </span>
+                                                                    <small>
+                                                                        {new Date(
+                                                                            `${day.date}T12:00:00`,
+                                                                        ).toLocaleDateString(
+                                                                            "en-PH",
+                                                                            {
+                                                                                weekday:
+                                                                                    "short",
+                                                                            },
+                                                                        )}
+                                                                    </small>
+                                                                </div>
+                                                            );
+                                                        },
+                                                    )}
+                                                </div>
+                                                <div className="campaign-chart-caption">
+                                                    Confirmed donations · last
+                                                    7 days
+                                                </div>
+                                            </>
+                                        ) : (
+                                            !analyticsError && (
+                                                <p className="form-note">
+                                                    No donation statistics are
+                                                    available yet.
+                                                </p>
+                                            )
+                                        )}
+                                    </Card>
+                                )}
                             </div>
                             <Card className="donate-panel">
-                                <Status value={campaign.status} />
+                                {viewTrackingError && (
+                                    <div className="inline-error" role="status">
+                                        Campaign views could not be updated:{" "}
+                                        {viewTrackingError}
+                                    </div>
+                                )}
+                                {campaign.status?.trim().toLowerCase() !==
+                                    "published" && (
+                                    <Status value={campaign.status} />
+                                )}
                                 <h2>Be part of the impact.</h2>
                                 <p>
                                     Your contribution can help this campaign
@@ -649,54 +1076,72 @@ export function CampaignDetailPage() {
                                     </b>
                                 </div>
                                 {signedIn &&
+                                canContribute &&
                                 (campaign.currency || "PHP") === "PHP" ? (
                                     <form
-                                        onSubmit={contribute}
+                                        onSubmit={reviewDonation}
                                         className="donate-form"
                                     >
-                                        <Field
-                                            label={`Contribution amount (${campaign.currency || "PHP"})`}
-                                            name="amount"
-                                            type="number"
-                                            min="1"
-                                            max="100000"
-                                            step="0.01"
-                                            placeholder="1000"
-                                            required
-                                        />
-                                        <div className="field">
-                                            <span>Payment method</span>
-                                            <label className="checkbox-line">
-                                                <input
-                                                    type="radio"
-                                                    name="payment_method"
-                                                    value="GCASH"
-                                                    checked={
-                                                        paymentMethod ===
-                                                        "GCASH"
-                                                    }
-                                                    onChange={() =>
-                                                        setPaymentMethod(
-                                                            "GCASH",
+                                        {!reviewingDonation ? (
+                                            <>
+                                                <Field
+                                                    label={`Contribution amount (${campaign.currency || "PHP"})`}
+                                                    name="amount"
+                                                    type="number"
+                                                    min="1"
+                                                    max={maxContribution}
+                                                    step="0.01"
+                                                    placeholder="1000"
+                                                    value={donationAmount}
+                                                    onChange={(event) =>
+                                                        setDonationAmount(
+                                                            event.target.value,
                                                         )
                                                     }
+                                                    required
                                                 />
-                                                GCash
-                                            </label>
-                                            <label className="checkbox-line">
-                                                <input
-                                                    type="radio"
-                                                    name="payment_method"
-                                                    value="MAYA"
-                                                    checked={
-                                                        paymentMethod === "MAYA"
-                                                    }
-                                                    onChange={() =>
-                                                        setPaymentMethod("MAYA")
-                                                    }
-                                                />
-                                                Maya
-                                            </label>
+                                        <div className="field">
+                                            <span>Payment method</span>
+                                            <div
+                                                className="payment-method-options"
+                                                role="radiogroup"
+                                                aria-label="Payment method"
+                                            >
+                                                <label className="checkbox-line payment-method-choice">
+                                                    <input
+                                                        type="radio"
+                                                        name="payment_method"
+                                                        value="GCASH"
+                                                        checked={
+                                                            paymentMethod ===
+                                                            "GCASH"
+                                                        }
+                                                        onChange={() =>
+                                                            setPaymentMethod(
+                                                                "GCASH",
+                                                            )
+                                                        }
+                                                    />
+                                                    GCash
+                                                </label>
+                                                <label className="checkbox-line payment-method-choice">
+                                                    <input
+                                                        type="radio"
+                                                        name="payment_method"
+                                                        value="MAYA"
+                                                        checked={
+                                                            paymentMethod ===
+                                                            "MAYA"
+                                                        }
+                                                        onChange={() =>
+                                                            setPaymentMethod(
+                                                                "MAYA",
+                                                            )
+                                                        }
+                                                    />
+                                                    Maya
+                                                </label>
+                                            </div>
                                         </div>
                                         <TextareaField
                                             label="Message (optional)"
@@ -711,6 +1156,75 @@ export function CampaignDetailPage() {
                                             />{" "}
                                             Make my contribution anonymous
                                         </label>
+                                            </>
+                                        ) : (
+                                            <div className="payment-review-panel">
+                                                <div className="eyebrow">
+                                                    REVIEW CONTRIBUTION
+                                                </div>
+                                                <div className="payment-review-row">
+                                                    <span>Contribution</span>
+                                                    <strong>
+                                                        {formatMoney(
+                                                            donationDraft?.amount,
+                                                            campaign.currency || "PHP",
+                                                        )}
+                                                    </strong>
+                                                </div>
+                                                <div className="payment-review-row">
+                                                    <span>Payment method</span>
+                                                    <strong>
+                                                        {paymentMethod === "GCASH"
+                                                            ? "GCash"
+                                                            : "Maya"}
+                                                    </strong>
+                                                </div>
+                                                <div className="payment-review-row">
+                                                    <span>Donor name</span>
+                                                    <strong>
+                                                        {donationDraft?.is_anonymous
+                                                            ? "Anonymous"
+                                                            : "Shown to campaign organizer"}
+                                                    </strong>
+                                                </div>
+                                                {donationDraft?.message && (
+                                                    <div className="payment-review-message">
+                                                        {donationDraft.message}
+                                                    </div>
+                                                )}
+                                                <p>
+                                                    You’ll complete payment on
+                                                    Xendit’s secure hosted
+                                                    checkout. Fundora records
+                                                    the contribution after the
+                                                    provider confirms payment.
+                                                </p>
+                                                <div className="payment-review-actions">
+                                                    <Button
+                                                        type="button"
+                                                        variant="outline"
+                                                        disabled={busy}
+                                                        onClick={() =>
+                                                            setReviewingDonation(false)
+                                                        }
+                                                    >
+                                                        Edit contribution
+                                                    </Button>
+                                                    <Button
+                                                        type="button"
+                                                        disabled={busy}
+                                                        onClick={() =>
+                                                            void submitDonation()
+                                                        }
+                                                    >
+                                                        {busy
+                                                            ? "Preparing checkout…"
+                                                            : "Continue to payment"}
+                                                        <ArrowRight size={16} />
+                                                    </Button>
+                                                </div>
+                                            </div>
+                                        )}
                                         {donationError && (
                                             <div className="inline-error">
                                                 {donationError}
@@ -722,12 +1236,28 @@ export function CampaignDetailPage() {
                                                 {success}
                                             </div>
                                         )}
-                                        <Button type="submit" disabled={busy}>
-                                            {busy
-                                                ? "Preparing checkout…"
-                                                : `Continue with ${paymentMethod === "GCASH" ? "GCash" : "Maya"}`}{" "}
-                                            <ArrowRight size={16} />
-                                        </Button>
+                                        {confirmedDonationId && (
+                                            <div className="payment-receipt-links">
+                                                <Link
+                                                    className="btn btn-outline"
+                                                    to={`/donations/${confirmedDonationId}`}
+                                                >
+                                                    View donation receipt
+                                                </Link>
+                                                <Link
+                                                    className="inline-link"
+                                                    to="/my-donations"
+                                                >
+                                                    Donation history
+                                                </Link>
+                                            </div>
+                                        )}
+                                        {!reviewingDonation && (
+                                            <Button type="submit" disabled={busy}>
+                                                Review contribution{" "}
+                                                <ArrowRight size={16} />
+                                            </Button>
+                                        )}
                                         {pendingPayment &&
                                             !pendingPayment.checkout_url && (
                                                 <Button
@@ -770,6 +1300,11 @@ export function CampaignDetailPage() {
                                             </>
                                         )}
                                     </form>
+                                ) : signedIn && !canContribute ? (
+                                    <div className="form-note">
+                                        Only donor and organizer accounts can
+                                        contribute to campaigns.
+                                    </div>
                                 ) : signedIn ? (
                                     <div className="form-note">
                                         GCash and Maya contributions are
@@ -792,7 +1327,14 @@ export function CampaignDetailPage() {
                         </div>
                     </div>
                 )}
-            </main>
+        </main>
+    );
+    return embedded ? (
+        <div className="portal-campaign-detail">{content}</div>
+    ) : (
+        <div className="marketing public-campaign-page">
+            <PublicHeader />
+            {content}
             <PublicFooter />
         </div>
     );

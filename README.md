@@ -137,8 +137,8 @@ If your Axum response structs differ, update the small adapter functions in `src
 1. Campaign API `GET /campaigns` is used for public listing and organizer overview. If the backend later exposes a dedicated organizer-owned endpoint, update `campaignApi.list()` to use it and scope records server-side.
 2. `GET /donations` and `GET /withdrawals` are wired to the resource collection paths. Confirm those list routes are present in your current Axum router. If not, add them or adjust `donationApi.list()` / `withdrawalApi.list()`.
 3. The frontend never trusts a client-supplied role for authorization. Role checks here are only navigation/UX; API middleware and handlers remain authoritative.
-4. Campaign create uses the current Postman payload shape (`title`, `description`, `image_url`, `goal_amount`, `currency`, `network`, `contract_address`, `starts_at`, `ends_at`). Replace placeholder contract/network defaults with your backend's actual campaign deployment configuration before production.
-5. The campaign detail page submits `campaign_id`, `amount`, `payment_method`, `is_anonymous`, and `message` to `POST /donations`. The backend accepts PHP campaigns and confirms contributions only from the local simulator or a verified Xendit session. Xendit records display their provider reference; blockchain hash, network, block, and confirmation fields are marked not applicable because GCash/Maya are off-chain. A successful Xendit checkout returns donors to `/dashboard` when `FRONTEND_ORIGIN` is public HTTPS; local HTTP origins omit the redirect URL. A backend poller verifies pending Xendit sessions every 30 seconds as a webhook fallback, and the dashboard offers a manual retry while confirmation is pending.
+4. Campaign create uses the current Postman payload shape (`title`, `description`, `image_url`, `goal_amount`, `currency`, `network`, `contract_address`, `starts_at`, `ends_at`). Draft and returned campaigns can be edited from their details; published, active, paused, completed, and archived campaigns are read-only. Replace placeholder contract/network defaults with your backend's actual campaign deployment configuration before production.
+5. The campaign detail page submits `campaign_id`, `amount`, `payment_method`, `is_anonymous`, and `message` to `POST /donations`. Donor and organizer accounts can contribute to PHP campaigns; a contribution cannot exceed the campaign's full fundraising goal or the existing PHP 100,000 per-payment cap. Contributions are confirmed only from the local simulator or a verified Xendit session. Xendit records display their provider reference; blockchain hash, network, block, and confirmation fields are marked not applicable because GCash/Maya are off-chain. Xendit return URLs must use HTTPS; configure `XENDIT_RETURN_ORIGIN` with a public HTTPS frontend or tunnel URL to return donors to `/dashboard`. Local HTTP development origins omit the callback URLs. For prompt confirmation, configure Xendit to send `payment_session.completed` and `payment_session.expired` events to the public HTTPS endpoint `/api/v1/webhooks/xendit` with the matching `XENDIT_WEBHOOK_TOKEN`; the backend verifies the session when the event arrives. The 2-second backend poll is only a fallback for missed or delayed webhooks, and the dashboard checks status while the donor returns from checkout.
 
 ## Project structure
 
@@ -167,7 +167,7 @@ src/
 - Live-mode payment processing and organizer payouts
 - Upload service for campaign images
 - Live notifications
-- Full campaign edit/archive UX
+- Campaign archival controls
 - End-to-end tests against a running backend
 
 These are not represented as completed integrations.

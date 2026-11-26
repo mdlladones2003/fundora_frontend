@@ -24,6 +24,7 @@ import {
     useLocation,
     useNavigate,
     useParams,
+    useSearchParams,
 } from "react-router-dom";
 import { Brand } from "../components/Layout";
 import { CachedImage } from "../components/CachedImage";
@@ -66,7 +67,15 @@ import type {
     OrganizerRoleRequest,
     Withdrawal,
 } from "../lib/types";
-import { formatDate, formatMoney, roleOf } from "../lib/utils";
+import {
+    filterCampaigns,
+    formatDate,
+    formatMoney,
+    isCampaignEditable,
+    roleOf,
+    type CampaignDateFilter,
+    type CampaignFilter,
+} from "../lib/utils";
 
 function PageHeading({
     eyebrow,
@@ -172,6 +181,7 @@ function DonorDashboard() {
     const [error, setError] = useState("");
     const [paymentDonationId, setPaymentDonationId] =
         useState<string | null>(paymentReturnId);
+    const [retryCampaignId, setRetryCampaignId] = useState("");
     const [paymentStatus, setPaymentStatus] = useState("");
     const [paymentMessage, setPaymentMessage] = useState("");
     const [paymentError, setPaymentError] = useState("");
@@ -203,6 +213,7 @@ function DonorDashboard() {
                     payment = await donationApi.paymentStatus(donationId);
                     const status = payment.status.toLowerCase();
                     setPaymentStatus(status);
+                    setRetryCampaignId(payment.campaign_id);
                     if (status !== "pending" || attempt === attempts - 1) {
                         break;
                     }
@@ -221,6 +232,11 @@ function DonorDashboard() {
                     setPaymentMessage(
                         "Xendit has not confirmed this payment yet. Check again in a moment.",
                     );
+                } else if (["failed", "expired"].includes(status)) {
+                    setPaymentMessage(
+                        `Xendit payment ${status}. Review the contribution and try again.`,
+                    );
+                    load();
                 } else {
                     setPaymentMessage(
                         `Xendit payment status: ${payment.status}.`,
@@ -298,6 +314,16 @@ function DonorDashboard() {
                                 : "Verify payment"}
                         </Button>
                     )}
+                    {["failed", "expired"].includes(paymentStatus) &&
+                        retryCampaignId && (
+                            <Link
+                                to={`/campaigns/${retryCampaignId}`}
+                                className="btn btn-primary payment-retry-link"
+                            >
+                                Review contribution again{" "}
+                                <ArrowUpRight size={16} />
+                            </Link>
+                        )}
                 </Card>
             )}
             {error && <div className="inline-error">{error}</div>}
@@ -305,22 +331,20 @@ function DonorDashboard() {
                 <Card className="stat-card">
                     <div className="stat-top">
                         <span>Confirmed contributions</span>
-                        <span className="stat-icon blue">
+                        <span className="stat-icon dark">
                             <CircleDollarSign />
                         </span>
                     </div>
                     <strong>{total}</strong>
-                    <small>Confirmed records only</small>
                 </Card>
                 <Card className="stat-card">
                     <div className="stat-top">
                         <span>Donations made</span>
-                        <span className="stat-icon neutral">
+                        <span className="stat-icon dark">
                             <Heart />
                         </span>
                     </div>
                     <strong>{donations.length}</strong>
-                    <small>Contribution records</small>
                 </Card>
                 <Card className="stat-card">
                     <div className="stat-top">
@@ -330,7 +354,6 @@ function DonorDashboard() {
                         </span>
                     </div>
                     <strong>{campaigns.length}</strong>
-                    <small>Published campaigns</small>
                 </Card>
             </div>
             <div className="section-row">
@@ -621,28 +644,34 @@ export function OrganizerDashboard() {
                 eyebrow="ORGANIZER WORKSPACE"
                 title="Your campaigns."
                 description="Create, manage, and monitor the campaigns you organize."
+                action={
+                    <Link
+                        to="/organizer/campaigns"
+                        className="btn btn-primary"
+                    >
+                        Manage campaigns <ArrowUpRight size={16} />
+                    </Link>
+                }
             />
             {error && <div className="inline-error">{error}</div>}
             <div className="stat-grid">
                 <Card className="stat-card">
                     <div className="stat-top">
                         <span>Campaigns visible</span>
-                        <span className="stat-icon blue">
+                        <span className="stat-icon dark">
                             <Heart />
                         </span>
                     </div>
                     <strong>{campaigns.length}</strong>
-                    <small>Returned by the campaign API</small>
                 </Card>
                 <Card className="stat-card">
                     <div className="stat-top">
                         <span>Published / active</span>
-                        <span className="stat-icon neutral">
+                        <span className="stat-icon dark">
                             <TrendingUp />
                         </span>
                     </div>
                     <strong>{active}</strong>
-                    <small>Based on campaign status</small>
                 </Card>
                 <Card className="stat-card">
                     <div className="stat-top">
@@ -659,7 +688,6 @@ export function OrganizerDashboard() {
                             ).length
                         }
                     </strong>
-                    <small>Awaiting publication</small>
                 </Card>
             </div>
             <div className="section-row">
@@ -676,10 +704,7 @@ export function OrganizerDashboard() {
                 <div className="campaign-grid">
                     {campaigns.map((c) => (
                         <div key={c.id} className="organizer-campaign-entry">
-                            <CampaignCard
-                                campaign={c}
-                                linkTo={`/organizer/campaigns/${c.id}/edit`}
-                            />
+                            <CampaignCard campaign={c} />
                             {c.review_feedback && (
                                 <div className="inline-error">
                                     Administrator feedback: {c.review_feedback}
@@ -787,6 +812,25 @@ export function CreateCampaignPage() {
                 </div>
                 <Link to="/organizer/campaigns" className="btn btn-outline">
                     Back to campaigns
+                </Link>
+            </>
+        );
+    if (id && campaign && !isCampaignEditable(campaign))
+        return (
+            <>
+                <PageHeading
+                    eyebrow="CAMPAIGN SETUP"
+                    title="Campaign can't be edited."
+                    description="Published campaigns are locked from further changes."
+                />
+                <div className="inline-error">
+                    This campaign has already been published and is read-only.
+                </div>
+                <Link
+                    to={`/campaigns/${campaign.id}`}
+                    className="btn btn-outline"
+                >
+                    View campaign
                 </Link>
             </>
         );
@@ -973,65 +1017,53 @@ export function AdminDashboard() {
                 </div>
             ) : (
                 summary && (
-                    <div className="stat-grid">
+                    <div className="stat-grid admin-stat-grid">
                         <Card className="stat-card">
                             <div className="stat-top">
                                 <span>Registered users</span>
-                                <span className="stat-icon blue">
+                                <span className="stat-icon dark">
                                     <Users />
                                 </span>
                             </div>
                             <strong>{summary.total_users}</strong>
-                            <small>
-                                {summary.total_donors} donors ·{" "}
-                                {summary.total_organizers} organizers
-                            </small>
                         </Card>
                         <Card className="stat-card">
                             <div className="stat-top">
                                 <span>Campaigns</span>
-                                <span className="stat-icon neutral">
+                                <span className="stat-icon dark">
                                     <Heart />
                                 </span>
                             </div>
                             <strong>{summary.total_campaigns}</strong>
-                            <small>
-                                {summary.active_campaigns} published or active
-                            </small>
                         </Card>
                         <Card className="stat-card">
                             <div className="stat-top">
-                                <span>Confirmed donations</span>
+                                <span>Donation value</span>
                                 <span className="stat-icon dark">
                                     <CircleDollarSign />
                                 </span>
                             </div>
-                            <strong>{summary.confirmed_donations}</strong>
-                            <small>{donationValue}</small>
+                            <strong className="admin-stat-value">
+                                {donationValue}
+                            </strong>
                         </Card>
                         <Card className="stat-card">
                             <div className="stat-top">
                                 <span>Pending withdrawals</span>
-                                <span className="stat-icon blue">
+                                <span className="stat-icon dark">
                                     <Wallet />
                                 </span>
                             </div>
                             <strong>{summary.pending_withdrawals}</strong>
-                            <small>Awaiting an administrator decision</small>
                         </Card>
                         <Card className="stat-card">
                             <div className="stat-top">
                                 <span>Blockchain transactions</span>
-                                <span className="stat-icon neutral">
+                                <span className="stat-icon dark">
                                     <ShieldCheck />
                                 </span>
                             </div>
                             <strong>{summary.total_transactions}</strong>
-                            <small>
-                                {summary.confirmed_transactions} confirmed ·{" "}
-                                {summary.flagged_transactions} flagged for
-                                review
-                            </small>
                         </Card>
                     </div>
                 )
@@ -1465,51 +1497,53 @@ export function ProfilePage() {
                             </div>
                         )}
                     </section>
-                    <section className="profile-access-section">
-                        <div className="profile-access-heading">
-                            <div>
-                                <h2>Payout wallet</h2>
-                                <p>
-                                    ETH campaign contributions are sent directly
-                                    to this wallet.
-                                </p>
-                            </div>
-                            <span
-                                className={`wallet-status ${user?.wallet_address ? "is-connected" : ""}`}
-                            >
-                                {user?.wallet_address
-                                    ? "Connected"
-                                    : "Not connected"}
-                            </span>
-                        </div>
-                        {user?.wallet_address ? (
-                            <div className="profile-wallet-address">
-                                <span>MetaMask address</span>
-                                <code>{user.wallet_address}</code>
-                                <small>
-                                    Wallet changes require Fundora support.
-                                </small>
-                            </div>
-                        ) : (
-                            <div className="profile-access-action">
-                                <p>
-                                    Connect MetaMask and sign a message to verify
-                                    wallet ownership. No transaction or gas fee
-                                    is required.
-                                </p>
-                                <Button
-                                    type="button"
-                                    onClick={linkWallet}
-                                    disabled={walletBusy}
+                    {roleOf(user) === "organizer" && (
+                        <section className="profile-access-section">
+                            <div className="profile-access-heading">
+                                <div>
+                                    <h2>Payout wallet</h2>
+                                    <p>
+                                        ETH campaign contributions are sent
+                                        directly to this wallet.
+                                    </p>
+                                </div>
+                                <span
+                                    className={`wallet-status ${user?.wallet_address ? "is-connected" : ""}`}
                                 >
-                                    <Wallet size={16} />
-                                    {walletBusy
-                                        ? "Connecting wallet…"
-                                        : "Connect payout wallet"}
-                                </Button>
+                                    {user?.wallet_address
+                                        ? "Connected"
+                                        : "Not connected"}
+                                </span>
                             </div>
-                        )}
-                    </section>
+                            {user?.wallet_address ? (
+                                <div className="profile-wallet-address">
+                                    <span>MetaMask address</span>
+                                    <code>{user.wallet_address}</code>
+                                    <small>
+                                        Wallet changes require Fundora support.
+                                    </small>
+                                </div>
+                            ) : (
+                                <div className="profile-access-action">
+                                    <p>
+                                        Connect MetaMask and sign a message to
+                                        verify wallet ownership. No transaction
+                                        or gas fee is required.
+                                    </p>
+                                    <Button
+                                        type="button"
+                                        onClick={linkWallet}
+                                        disabled={walletBusy}
+                                    >
+                                        <Wallet size={16} />
+                                        {walletBusy
+                                            ? "Connecting wallet…"
+                                            : "Connect payout wallet"}
+                                    </Button>
+                                </div>
+                            )}
+                        </section>
+                    )}
                     {accessError && (
                         <div className="inline-error" role="alert">
                             {accessError}
@@ -1736,19 +1770,39 @@ export function OrganizerCampaignsPage() {
     const [campaigns, setCampaigns] = useState<Campaign[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
+    const [filter, setFilter] = useState<CampaignFilter>("all");
+    const [dateFilter, setDateFilter] =
+        useState<CampaignDateFilter>("newest");
+    const [query, setQuery] = useState("");
     useEffect(() => {
-        campaignApi
-            .mine()
-            .then(setCampaigns)
+        Promise.all([campaignApi.list(), campaignApi.mine()])
+            .then(([publicCampaigns, ownedCampaigns]) => {
+                const byId = new Map(
+                    [...publicCampaigns, ...ownedCampaigns].map((campaign) => [
+                        campaign.id,
+                        campaign,
+                    ]),
+                );
+                setCampaigns([...byId.values()]);
+            })
             .catch((e) => setError(e.message))
             .finally(() => setLoading(false));
     }, []);
+    const filteredCampaigns = filterCampaigns(
+        campaigns,
+        filter,
+        dateFilter,
+    ).filter((campaign) =>
+        `${campaign.title} ${campaign.description || ""} ${campaign.category || ""}`
+            .toLowerCase()
+            .includes(query.toLowerCase()),
+    );
     return (
         <>
             <PageHeading
                 eyebrow="ORGANIZER WORKSPACE"
-                title="My campaigns."
-                description="Create, edit, submit, and monitor your campaigns."
+                title="Manage campaigns."
+                description="Explore campaigns and manage the causes you organize."
                 action={
                     <Link
                         to="/organizer/campaigns/new"
@@ -1759,30 +1813,80 @@ export function OrganizerCampaignsPage() {
                 }
             />
             {error && <div className="inline-error">{error}</div>}
+            <div className="organizer-campaign-tools">
+                <Field
+                    label="Search campaigns"
+                    name="campaign-search"
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    placeholder="Search title or cause"
+                />
+                <label className="field">
+                    <span>Date posted</span>
+                    <select
+                        value={dateFilter}
+                        onChange={(event) =>
+                            setDateFilter(
+                                event.target.value as CampaignDateFilter,
+                            )
+                        }
+                    >
+                        <option value="newest">Newest first</option>
+                        <option value="oldest">Oldest first</option>
+                        <option value="week">Posted in the last 7 days</option>
+                        <option value="month">Posted in the last 30 days</option>
+                    </select>
+                </label>
+            </div>
+            <div
+                className="campaign-filter-tabs"
+                role="group"
+                aria-label="Filter campaigns"
+            >
+                {(
+                    [
+                        ["all", "All campaigns"],
+                        ["goal-reached", "Goal reached"],
+                        ["goal-unreached", "Goal unreached"],
+                        ["closed", "Closed"],
+                        ["draft", "Draft"],
+                    ] as const
+                ).map(([value, label]) => (
+                    <button
+                        key={value}
+                        type="button"
+                        className={filter === value ? "active" : ""}
+                        onClick={() => setFilter(value)}
+                    >
+                        {label}
+                    </button>
+                ))}
+            </div>
             {loading ? (
                 <div className="center-loading">
                     <Spinner />
                 </div>
-            ) : campaigns.length ? (
+            ) : filteredCampaigns.length ? (
                 <div className="campaign-grid">
-                    {campaigns.map((c) => (
-                        <div key={c.id} className="organizer-campaign-entry">
-                            <CampaignCard
-                                campaign={c}
-                                linkTo={`/organizer/campaigns/${c.id}/edit`}
-                            />
+                    {filteredCampaigns.map((c) => (
+                        <div
+                            key={c.id}
+                            className="organizer-campaign-entry"
+                        >
+                            <CampaignCard campaign={c} />
                             {c.review_feedback && (
                                 <div className="inline-error">
-                                    Administrator feedback: {c.review_feedback}
-                                </div>
-                            )}
+                                    Administrator feedback:{" "}
+                                    {c.review_feedback}
+                                    </div>
+                                )}
                         </div>
                     ))}
                 </div>
             ) : (
                 <EmptyState
-                    title="No campaigns yet"
-                    description="Create a campaign and submit it for administrator review."
+                    title="No campaigns match"
+                    description="Adjust the search or filters, or create a new campaign."
                 />
             )}
         </>
@@ -1794,6 +1898,11 @@ export function OrganizerDonationsPage() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
     const [selected, setSelected] = useState<Donation | null>(null);
+    const [searchParams] = useSearchParams();
+    const [search, setSearch] = useState(searchParams.get("search") || "");
+    useEffect(() => {
+        setSearch(searchParams.get("search") || "");
+    }, [searchParams]);
     useEffect(() => {
         let active = true;
         const refresh = () => {
@@ -1822,6 +1931,11 @@ export function OrganizerDonationsPage() {
     const isOffchainPayment = ["xendit", "mock"].includes(
         (selected?.payment_provider || "").toLowerCase(),
     );
+    const filteredItems = items.filter((item) =>
+        `${item.donor_name || ""} ${item.donor_email || ""} ${item.campaign_title || ""}`
+            .toLowerCase()
+            .includes(search.toLowerCase()),
+    );
     return (
         <>
             <PageHeading
@@ -1829,14 +1943,23 @@ export function OrganizerDonationsPage() {
                 title="Donation records."
                 description="Review campaign contributions, provider payments, and on-chain transaction details."
             />
+            <div className="organizer-donation-search">
+                <Field
+                    label="Search donors or campaigns"
+                    name="donation-search"
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder="Search donor or campaign name"
+                />
+            </div>
             <Card className="table-card">
                 {error && <div className="inline-error">{error}</div>}
                 {loading ? (
                     <div className="center-loading">
                         <Spinner />
                     </div>
-                ) : items.length ? (
-                    <PaginatedTable items={items}>
+                ) : filteredItems.length ? (
+                    <PaginatedTable items={filteredItems}>
                         {(pageItems) => (
                             <div className="table-scroll">
                                 <table>
@@ -1919,8 +2042,12 @@ export function OrganizerDonationsPage() {
                     </PaginatedTable>
                 ) : (
                     <EmptyState
-                        title="No donation records"
-                        description="Confirmed and pending records for your campaigns will appear here."
+                        title={items.length ? "No matching records" : "No donation records"}
+                        description={
+                            items.length
+                                ? "Try another donor or campaign search."
+                                : "Confirmed and pending records for your campaigns will appear here."
+                        }
                     />
                 )}
             </Card>
@@ -2318,7 +2445,8 @@ export function AdminUsersPage() {
     const [loading, setLoading] = useState(true);
     const [busy, setBusy] = useState("");
     const [error, setError] = useState("");
-    const [query, setQuery] = useState("");
+    const [searchParams] = useSearchParams();
+    const [query, setQuery] = useState(searchParams.get("search") || "");
     const [roleFilter, setRoleFilter] = useState("all");
     const [statusFilter, setStatusFilter] = useState("all");
     const [selected, setSelected] = useState<AdminUser | null>(null);
@@ -2682,7 +2810,8 @@ export function AdminCampaignsPage() {
     const [items, setItems] = useState<Campaign[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
-    const [query, setQuery] = useState("");
+    const [searchParams] = useSearchParams();
+    const [query, setQuery] = useState(searchParams.get("search") || "");
     const [statusFilter, setStatusFilter] = useState("all");
     const [selected, setSelected] = useState<Campaign | null>(null);
     const load = () => {
@@ -2789,6 +2918,7 @@ export function AdminCampaignsPage() {
                                     <th>Goal</th>
                                     <th>Deadline</th>
                                     <th>Status</th>
+                                    <th>Actions</th>
                                     <th>Decision</th>
                                 </tr>
                             </thead>
@@ -2820,6 +2950,18 @@ export function AdminCampaignsPage() {
                                         </td>
                                         <td>
                                             <Status value={c.status} />
+                                        </td>
+                                        <td>
+                                            <div className="row-actions">
+                                                <Button
+                                                    variant="outline"
+                                                    onClick={() =>
+                                                        setSelected(c)
+                                                    }
+                                                >
+                                                    View details
+                                                </Button>
+                                            </div>
                                         </td>
                                         <td>
                                             {c.status === "pending_review" ? (

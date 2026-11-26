@@ -43,11 +43,25 @@ export interface Campaign {
   organizer?: { id?: string; name?: string }
   created_at?: string
   category?: string
+  donor_count?: number
   beneficiary_name?: string
   beneficiary_details?: string
   supporting_info?: string
   review_feedback?: string
   submit_for_review?: boolean
+}
+
+export interface CampaignDailyStatistic {
+  date: string
+  amount: number | string
+}
+
+export interface CampaignAnalytics {
+  campaign_id: string
+  views_count: number
+  total_donors: number
+  donations_today: number | string
+  daily_statistics: CampaignDailyStatistic[]
 }
 
 export interface Donation {

@@ -60,13 +60,36 @@ function RequireRole({
     if (!roles.includes(role)) return <Navigate to="/dashboard" replace />;
     return <>{children}</>;
 }
+
+function CampaignsRoute() {
+    const { signedIn } = useAuth();
+    return signedIn ? (
+        <AppLayout>
+            <ExploreCampaignsPage embedded />
+        </AppLayout>
+    ) : (
+        <ExploreCampaignsPage />
+    );
+}
+
+function CampaignDetailRoute() {
+    const { signedIn } = useAuth();
+    return signedIn ? (
+        <AppLayout>
+            <CampaignDetailPage embedded />
+        </AppLayout>
+    ) : (
+        <CampaignDetailPage />
+    );
+}
+
 export default function App() {
     return (
         <Routes>
             <Route path="/" element={<HomePage />} />
             <Route path="/login" element={<AuthPage />} />
-            <Route path="/campaigns" element={<ExploreCampaignsPage />} />
-            <Route path="/campaigns/:id" element={<CampaignDetailPage />} />
+            <Route path="/campaigns" element={<CampaignsRoute />} />
+            <Route path="/campaigns/:id" element={<CampaignDetailRoute />} />
             <Route path="/verify/:hash" element={<VerifyPage />} />
             <Route
                 element={

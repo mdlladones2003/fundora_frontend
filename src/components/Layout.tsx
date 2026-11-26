@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
+import type { ReactNode } from "react";
 import {
-    ArrowUpRight,
     Bell,
     ChevronDown,
     CircleUserRound,
@@ -9,7 +9,6 @@ import {
     LayoutDashboard,
     LogOut,
     Menu,
-    Plus,
     ShieldCheck,
     Users,
     Wallet,
@@ -17,12 +16,18 @@ import {
     ReceiptText,
     ScrollText,
     CircleDollarSign,
+    Search,
     X,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { roleOf } from "../lib/utils";
-import { notificationApi } from "../lib/api";
-import type { Notification } from "../lib/types";
+import {
+    adminApi,
+    campaignApi,
+    donationApi,
+    notificationApi,
+} from "../lib/api";
+import type { AdminUser, Campaign, Donation, Notification } from "../lib/types";
 
 export function Brand({ light = false, to }: { light?: boolean; to?: string }) {
     const { signedIn } = useAuth();
@@ -47,9 +52,10 @@ function NotificationMenu() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
     const navigate = useNavigate();
+    const menuRef = useRef<HTMLDivElement>(null);
     const unreadCount = items.filter((item) => !item.read_at).length;
 
-    const loadNotifications = async () => {
+    const loadNotifications = useCallback(async () => {
         setLoading(true);
         setError("");
         try {
@@ -63,7 +69,28 @@ function NotificationMenu() {
         } finally {
             setLoading(false);
         }
-    };
+    }, []);
+
+    useEffect(() => {
+        void loadNotifications();
+        const closeOnOutsideClick = (event: PointerEvent) => {
+            if (
+                event.target instanceof Node &&
+                !menuRef.current?.contains(event.target)
+            ) {
+                setOpen(false);
+            }
+        };
+        const closeOnEscape = (event: KeyboardEvent) => {
+            if (event.key === "Escape") setOpen(false);
+        };
+        document.addEventListener("pointerdown", closeOnOutsideClick);
+        document.addEventListener("keydown", closeOnEscape);
+        return () => {
+            document.removeEventListener("pointerdown", closeOnOutsideClick);
+            document.removeEventListener("keydown", closeOnEscape);
+        };
+    }, [loadNotifications]);
 
     const toggle = () => {
         const nextOpen = !open;
@@ -99,7 +126,7 @@ function NotificationMenu() {
     };
 
     return (
-        <div className="notification-menu">
+        <div className="notification-menu" ref={menuRef}>
             <button
                 className="icon-button notification-trigger"
                 title="Notifications"
@@ -161,13 +188,334 @@ function NotificationMenu() {
     );
 }
 
-export function AppLayout() {
-    const { user, signOut } = useAuth();
-    const [mobileOpen, setMobileOpen] = useState(false);
-    const navigate = useNavigate();
+type SearchResult = {
+    label: string;
+    detail: string;
+    href: string;
+    type: "Campaign" | "Donor" | "Page";
+};
+
+export function GlobalSearch({ compact = false }: { compact?: boolean }) {
+    const { user } = useAuth();
     const role = roleOf(user);
+    const [query, setQuery] = useState("");
+    const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+    const [donations, setDonations] = useState<Donation[]>([]);
+    const [users, setUsers] = useState<AdminUser[]>([]);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState("");
+    const [open, setOpen] = useState(false);
+    const [loadedRole, setLoadedRole] = useState("");
+    const searchRef = useRef<HTMLDivElement>(null);
+    const navigate = useNavigate();
+    const term = query.trim().toLowerCase();
+
+    useEffect(() => {
+        if (term.length < 2) {
+            setOpen(false);
+            setError("");
+            return;
+        }
+        setOpen(true);
+        if (loadedRole === role) return;
+        let active = true;
+        const timer = window.setTimeout(() => {
+            setLoading(true);
+            const campaignRequest =
+                role === "administrator" || role === "admin"
+                    ? adminApi.campaigns()
+                    : campaignApi.list();
+            Promise.all([
+                Promise.all([
+                    campaignRequest,
+                    role === "organizer"
+                        ? campaignApi.mine()
+                        : Promise.resolve([] as Campaign[]),
+                ]).then(([publicItems, ownedItems]) => {
+                    const byId = new Map(
+                        [...publicItems, ...ownedItems].map((campaign) => [
+                            campaign.id,
+                            campaign,
+                        ]),
+                    );
+                    return [...byId.values()];
+                }),
+                role === "organizer"
+                    ? donationApi.organizerList()
+                    : Promise.resolve([] as Donation[]),
+                role === "administrator" || role === "admin"
+                    ? adminApi.users()
+                    : Promise.resolve([] as AdminUser[]),
+            ])
+                .then(([campaignItems, donationItems, userItems]) => {
+                    if (!active) return;
+                    setCampaigns(campaignItems);
+                    setDonations(donationItems);
+                    setUsers(userItems);
+                    setError("");
+                    setLoadedRole(role);
+                })
+                .catch((searchError: unknown) => {
+                    if (active) {
+                        setError(
+                            searchError instanceof Error
+                                ? searchError.message
+                                : "Search results could not be loaded.",
+                        );
+                    }
+                })
+                .finally(() => {
+                    if (active) setLoading(false);
+                });
+        }, 180);
+        return () => {
+            active = false;
+            window.clearTimeout(timer);
+        };
+    }, [loadedRole, role, term]);
+
+    useEffect(() => {
+        const closeOnOutsideClick = (event: PointerEvent) => {
+            if (
+                event.target instanceof Node &&
+                !searchRef.current?.contains(event.target)
+            ) {
+                setOpen(false);
+            }
+        };
+        const closeOnEscape = (event: KeyboardEvent) => {
+            if (event.key === "Escape") setOpen(false);
+        };
+        document.addEventListener("pointerdown", closeOnOutsideClick);
+        document.addEventListener("keydown", closeOnEscape);
+        return () => {
+            document.removeEventListener("pointerdown", closeOnOutsideClick);
+            document.removeEventListener("keydown", closeOnEscape);
+        };
+    }, []);
+
+    const results: SearchResult[] = [];
+    campaigns
+        .filter((campaign) =>
+            `${campaign.title} ${campaign.description || ""} ${campaign.category || ""}`
+                .toLowerCase()
+                .includes(term),
+        )
+        .slice(0, 4)
+        .forEach((campaign) => {
+            const isManageable = ["draft", "pending_review", "changes_requested", "rejected"].includes(
+                (campaign.status || "").toLowerCase(),
+            );
+            results.push({
+                label: campaign.title,
+                detail: `${campaign.category || "Campaign"} · ${campaign.status || "active"}`,
+                href:
+                    isManageable && role === "organizer"
+                        ? `/organizer/campaigns/${campaign.id}/edit`
+                        : role === "administrator" || role === "admin"
+                          ? `/admin/campaigns?search=${encodeURIComponent(campaign.title)}`
+                          : `/campaigns/${campaign.id}`,
+                type: "Campaign",
+            });
+        });
+
+    const matchedDonors = new Set<string>();
+    donations.forEach((donation) => {
+        const name = donation.is_anonymous
+            ? "Anonymous donor"
+            : donation.donor_name || "Fundora donor";
+        const key = name.toLowerCase();
+        if (key.includes(term) && !matchedDonors.has(key)) {
+            matchedDonors.add(key);
+            results.push({
+                label: name,
+                detail: donation.campaign_title || "Campaign donor",
+                href: `/organizer/donations?search=${encodeURIComponent(name)}`,
+                type: "Donor",
+            });
+        }
+    });
+    users
+        .filter(
+            (item) =>
+                item.role === "donor" &&
+                `${item.display_name || ""} ${item.email}`.toLowerCase().includes(term),
+        )
+        .slice(0, 4)
+        .forEach((item) => {
+            results.push({
+                label: item.display_name || item.email,
+                detail: item.email,
+                href: `/admin/users?search=${encodeURIComponent(term)}`,
+                type: "Donor",
+            });
+        });
+
+    const pages = [
+        { label: "Explore campaigns", href: "/campaigns" },
+        { label: "My donations", href: "/my-donations" },
+        { label: "My campaigns", href: "/organizer/campaigns" },
+        { label: "Create campaign", href: "/organizer/campaigns/new" },
+        { label: "Profile settings", href: "/profile" },
+    ];
+    pages
+        .filter(
+            (page) =>
+                page.label.toLowerCase().includes(term) &&
+                (!page.href.startsWith("/organizer/") || role === "organizer"),
+        )
+        .forEach((page) =>
+            results.push({
+                label: page.label,
+                detail: "Page",
+                href: page.href,
+                type: "Page",
+            }),
+        );
+
+    const selectResult = (result: SearchResult) => {
+        navigate(result.href);
+        setQuery("");
+        setOpen(false);
+    };
+
+    return (
+        <div
+            className={`global-search ${compact ? "global-search-compact" : ""}`}
+            ref={searchRef}
+        >
+            <button
+                type="button"
+                className="global-search-icon"
+                aria-label="Focus search"
+                onClick={() =>
+                    searchRef.current?.querySelector("input")?.focus()
+                }
+            >
+                <Search size={16} aria-hidden="true" />
+            </button>
+            <input
+                type="search"
+                value={query}
+                placeholder="Search campaigns, donors…"
+                aria-label="Search campaigns, donors, and pages"
+                aria-expanded={open}
+                aria-controls="global-search-results"
+                onChange={(event) => setQuery(event.target.value)}
+                onFocus={() => {
+                    if (term.length >= 2) setOpen(true);
+                }}
+            />
+            {open && term.length >= 2 && (
+                <div
+                    className="global-search-results"
+                    id="global-search-results"
+                    role="listbox"
+                    aria-label="Search results"
+                >
+                    {error ? (
+                        <div className="global-search-message">{error}</div>
+                    ) : loading ? (
+                        <div className="global-search-message">Searching…</div>
+                    ) : results.length ? (
+                        results.slice(0, 8).map((result, index) => (
+                            <button
+                                type="button"
+                                role="option"
+                                aria-selected="false"
+                                key={`${result.type}-${result.href}-${index}`}
+                                onClick={() => selectResult(result)}
+                            >
+                                <span>
+                                    <b>{result.label}</b>
+                                    <small>{result.detail}</small>
+                                </span>
+                                <em>{result.type}</em>
+                            </button>
+                        ))
+                    ) : (
+                        <div className="global-search-message">
+                            No matching campaigns, donors, or pages.
+                        </div>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+}
+
+function AccountMenu() {
+    const { user, signOut } = useAuth();
+    const [open, setOpen] = useState(false);
+    const menuRef = useRef<HTMLDivElement>(null);
+    const navigate = useNavigate();
     const displayName =
-        user?.display_name || user?.name || user?.full_name || "Fundora user";
+        user?.display_name || user?.name || user?.full_name || user?.email || "Account";
+
+    useEffect(() => {
+        const closeOnOutsideClick = (event: PointerEvent) => {
+            if (
+                event.target instanceof Node &&
+                !menuRef.current?.contains(event.target)
+            ) {
+                setOpen(false);
+            }
+        };
+        const closeOnEscape = (event: KeyboardEvent) => {
+            if (event.key === "Escape") setOpen(false);
+        };
+        document.addEventListener("pointerdown", closeOnOutsideClick);
+        document.addEventListener("keydown", closeOnEscape);
+        return () => {
+            document.removeEventListener("pointerdown", closeOnOutsideClick);
+            document.removeEventListener("keydown", closeOnEscape);
+        };
+    }, []);
+
+    const logout = async () => {
+        await signOut();
+        navigate("/login");
+    };
+
+    return (
+        <div className="account-menu" ref={menuRef}>
+            <button
+                type="button"
+                className="topbar-user"
+                aria-expanded={open}
+                aria-haspopup="menu"
+                onClick={() => setOpen((value) => !value)}
+            >
+                <CircleUserRound size={19} />
+                <span>{displayName}</span>
+                <ChevronDown size={14} />
+            </button>
+            {open && (
+                <div className="account-menu-panel" role="menu">
+                    <Link
+                        to="/profile"
+                        role="menuitem"
+                        onClick={() => setOpen(false)}
+                    >
+                        Profile settings
+                    </Link>
+                    <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => void logout()}
+                    >
+                        <LogOut size={15} /> Sign out
+                    </button>
+                </div>
+            )}
+        </div>
+    );
+}
+
+export function AppLayout({ children }: { children?: ReactNode } = {}) {
+    const { user } = useAuth();
+    const [mobileOpen, setMobileOpen] = useState(false);
+    const role = roleOf(user);
     const links =
         role === "administrator" || role === "admin"
             ? [
@@ -176,6 +524,7 @@ export function AppLayout() {
                       label: "Overview",
                       icon: LayoutDashboard,
                   },
+                  { to: "/campaigns", label: "Explore campaigns", icon: HeartHandshake },
                   { to: "/admin/users", label: "Users", icon: Users },
                   {
                       to: "/admin/role-requests",
@@ -213,13 +562,8 @@ export function AppLayout() {
                     },
                     {
                         to: "/organizer/campaigns",
-                        label: "My campaigns",
+                        label: "Manage campaigns",
                         icon: HeartHandshake,
-                    },
-                    {
-                        to: "/organizer/campaigns/new",
-                        label: "Create campaign",
-                        icon: Plus,
                     },
                     {
                         to: "/organizer/donations",
@@ -231,7 +575,6 @@ export function AppLayout() {
                         label: "Withdrawals",
                         icon: Wallet,
                     },
-                    { to: "/profile", label: "Profile", icon: CircleUserRound },
                 ]
               : [
                     {
@@ -239,17 +582,13 @@ export function AppLayout() {
                         label: "Overview",
                         icon: LayoutDashboard,
                     },
+                    { to: "/campaigns", label: "Explore campaigns", icon: HeartHandshake },
                     {
                         to: "/my-donations",
                         label: "My donations",
                         icon: HeartHandshake,
                     },
-                    { to: "/profile", label: "Profile", icon: CircleUserRound },
                 ];
-    const logout = async () => {
-        await signOut();
-        navigate("/login");
-    };
     return (
         <div className="app-shell">
             <aside className={`sidebar ${mobileOpen ? "sidebar-open" : ""}`}>
@@ -279,30 +618,6 @@ export function AppLayout() {
                         </NavLink>
                     ))}
                 </nav>
-                <div className="sidebar-bottom">
-                    <div className="help-card">
-                        <div className="help-icon">
-                            <ShieldCheck size={18} />
-                        </div>
-                        <strong>Give with confidence</strong>
-                        <p>
-                            Track campaigns and keep up with every contribution.
-                        </p>
-                        <Link to="/campaigns">
-                            Explore campaigns <ArrowUpRight size={14} />
-                        </Link>
-                    </div>
-                    <button className="profile-row" onClick={logout}>
-                        <span className="avatar">
-                            {displayName.charAt(0).toUpperCase()}
-                        </span>
-                        <span className="profile-copy">
-                            <b>{displayName}</b>
-                            <small>{user?.email || role}</small>
-                        </span>
-                        <LogOut size={17} />
-                    </button>
-                </div>
             </aside>
             {mobileOpen && (
                 <button
@@ -330,21 +645,14 @@ export function AppLayout() {
                         </b>
                     </div>
                     <div className="topbar-actions">
+                        <GlobalSearch />
                         <NotificationMenu />
                         <span className="topbar-divider" />
-                        <span className="topbar-user">
-                            <CircleUserRound size={19} />
-                            {user?.display_name ||
-                                user?.name ||
-                                user?.full_name ||
-                                user?.email ||
-                                "Account"}
-                            <ChevronDown size={14} />
-                        </span>
+                        <AccountMenu />
                     </div>
                 </header>
                 <div className="page-content">
-                    <Outlet />
+                    {children ?? <Outlet />}
                 </div>
             </main>
         </div>

@@ -1,4 +1,4 @@
-import type { AdminDashboardSummary, AdminTransaction, AdminUser, AuditLog, Campaign, Donation, DonationPayment, OrganizerRoleRequest, SiweNonce, Withdrawal } from './types'
+import type { AdminDashboardSummary, AdminTransaction, AdminUser, AuditLog, Campaign, CampaignAnalytics, Donation, DonationPayment, OrganizerRoleRequest, SiweNonce, Withdrawal } from './types'
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || '/api/v1').replace(/\/$/, '')
 const USE_CREDENTIALS = import.meta.env.VITE_USE_CREDENTIALS === 'true'
@@ -103,6 +103,8 @@ export const campaignApi = {
     return (Array.isArray(data) ? data : data?.items ?? data?.campaigns ?? []) as Campaign[]
   },
   get: (id: string) => request<Campaign>(`/campaigns/${encodeURIComponent(id)}`),
+  trackView: (id: string, session_id: string) => request(`/campaigns/${encodeURIComponent(id)}/views`, json('POST', { session_id })),
+  organizerAnalytics: () => request<CampaignAnalytics[]>('/organizer/campaigns/analytics'),
   create: (body: Partial<Campaign> & { network?: string; contract_address?: string }) => request('/campaigns', json('POST', body)),
   update: (id: string, body: Partial<Campaign>) => request(`/campaigns/${encodeURIComponent(id)}`, json('PATCH', body)),
   mine: async () => {
