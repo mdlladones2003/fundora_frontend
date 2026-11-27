@@ -34,7 +34,7 @@ type GoogleIdentity = {
                     shape: "pill";
                     text: "continue_with";
                     width: number;
-                    logo_alignment: "left";
+                    logo_alignment: "center";
                 },
             ) => void;
         };
@@ -372,7 +372,7 @@ export function AuthPage() {
                         shape: "pill",
                         text: "continue_with",
                         width,
-                        logo_alignment: "left",
+                        logo_alignment: "center",
                     });
                 } catch {
                     Array.from(container.childNodes).forEach((node) => {
@@ -490,43 +490,6 @@ export function AuthPage() {
                     </p>
                     {step === "email" ? (
                         <>
-                            <form
-                                onSubmit={sendOtp}
-                                className="auth-form auth-email-form"
-                            >
-                                <div className="field auth-email-field">
-                                    <label htmlFor="auth-email">
-                                        Email address
-                                    </label>
-                                    <div className="auth-email-input-row">
-                                        <input
-                                            id="auth-email"
-                                            type="email"
-                                            placeholder="you@example.com"
-                                            autoComplete="email"
-                                            value={email}
-                                            onChange={(event) =>
-                                                setEmail(event.target.value)
-                                            }
-                                            required
-                                        />
-                                        <Button
-                                            type="submit"
-                                            aria-label={
-                                                busy
-                                                    ? "Sending sign-in code"
-                                                    : "Send sign-in code"
-                                            }
-                                            disabled={busy || !email.trim()}
-                                        >
-                                            <ArrowRight size={17} />
-                                        </Button>
-                                    </div>
-                                </div>
-                            </form>
-                            <div className="auth-divider">
-                                <span>or continue with</span>
-                            </div>
                             <div className="auth-provider-list">
                                 <div
                                     id="google-sign-in"
@@ -570,6 +533,36 @@ export function AuthPage() {
                                     <Wallet size={18} /> Continue with MetaMask
                                 </button>
                             </div>
+                            <div className="auth-divider">
+                                <span>OR</span>
+                            </div>
+                            <form
+                                onSubmit={sendOtp}
+                                className="auth-form auth-email-form"
+                            >
+                                <div className="field auth-email-field">
+                                    <div className="auth-email-input-row">
+                                        <input
+                                            id="auth-email"
+                                            type="email"
+                                            aria-label="Email address"
+                                            placeholder="Enter your email"
+                                            autoComplete="email"
+                                            value={email}
+                                            onChange={(event) =>
+                                                setEmail(event.target.value)
+                                            }
+                                            required
+                                        />
+                                    </div>
+                                </div>
+                                <Button
+                                    type="submit"
+                                    disabled={busy}
+                                >
+                                    Continue with email
+                                </Button>
+                            </form>
                         </>
                     ) : (
                         <form onSubmit={verify} className="auth-form">
